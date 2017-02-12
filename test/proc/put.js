@@ -1,8 +1,8 @@
 import test from 'tape';
+import { createStore } from 'redux'
 import proc from '../../src/internal/proc'
 import * as io from '../../src/effects'
-import {emitter, channel} from '../../src/internal/channel'
-
+import {createStdChannel, channel} from '../../src/internal/channel'
 
 test('proc put handling', assert => {
   assert.plan(1)
@@ -15,7 +15,7 @@ test('proc put handling', assert => {
     yield io.put(2)
   }
 
-  proc(genFn('arg'), undefined, dispatch).done.catch(err => assert.fail(err))
+  proc(genFn('arg'), createStdChannel(), dispatch).done.catch(err => assert.fail(err))
 
   const expected = ['arg', 2];
   setTimeout(() => {
@@ -66,7 +66,7 @@ test('proc async put\'s response handling', assert => {
     actual.push(yield io.put.resolve(2))
   }
 
-  proc(genFn('arg'), undefined, dispatch).done.catch(err => assert.fail(err))
+  proc(genFn('arg'), createStdChannel(), dispatch).done.catch(err => assert.fail(err))
 
   const expected = ['arg', 2];
   setTimeout(() => {
@@ -93,7 +93,7 @@ test('proc error put\'s response handling', assert => {
     }
   }
 
-  proc(genFn('arg'), undefined, dispatch).done.catch(err => assert.fail(err))
+  proc(genFn('arg'), createStdChannel(), dispatch).done.catch(err => assert.fail(err))
 
   const expected = ['put resume'];
   setTimeout(() => {
@@ -119,7 +119,7 @@ test('proc error put.resolve\'s response handling', assert => {
     }
   }
 
-  proc(genFn('arg'), undefined, dispatch).done.catch(err => assert.fail(err))
+  proc(genFn('arg'), createStdChannel(), dispatch).done.catch(err => assert.fail(err))
 
   const expected = ['error arg'];
   setTimeout(() => {
@@ -135,7 +135,7 @@ test('proc nested puts handling', assert => {
   assert.plan(1)
 
   let actual = []
-  const em = emitter()
+  const store = createStore(() => {})
 
   function* genA() {
     yield io.put({type: 'a'})
@@ -148,13 +148,12 @@ test('proc nested puts handling', assert => {
     actual.push('put b')
   }
 
-
   function* root() {
     yield io.fork(genB) // forks genB first to be ready to take before genA starts putting
     yield io.fork(genA)
   }
 
-  proc(root(), em.subscribe, em.emit).done.catch(err => assert.fail(err))
+  proc(root(), createStdChannel(), store.dispatch).done.catch(err => assert.fail(err))
 
   const expected = ['put a', 'put b'];
   setTimeout(() => {

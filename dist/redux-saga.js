@@ -219,6 +219,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return is.notUndef(object) && hasOwnProperty.call(object, property);
 	}
 
+	var once = exports.once = function once(fn) {
+	  var cached = void 0;
+	  return function () {
+	    return cached || (cached = fn.apply(undefined, arguments));
+	  };
+	};
+
 	var is = exports.is = {
 	  undef: function undef(v) {
 	    return v === null || v === undefined;
@@ -518,14 +525,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.UNDEFINED_INPUT_ERROR = exports.INVALID_BUFFER = exports.isEnd = exports.END = undefined;
+	exports.createStdChannel = exports.UNDEFINED_INPUT_ERROR = exports.INVALID_BUFFER = exports.isEnd = exports.END = undefined;
 
 	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 	exports.emitter = emitter;
 	exports.channel = channel;
+	exports.multicastChannel = multicastChannel;
 	exports.eventChannel = eventChannel;
-	exports.stdChannel = stdChannel;
 
 	var _utils = __webpack_require__(1);
 
@@ -586,22 +593,57 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 	  }
 
-	  function put(input) {
+	  function checkPut(input) {
+	    console.log('checkForbiddenStates()', checkForbiddenStates());
 	    checkForbiddenStates();
 	    (0, _utils.check)(input, _utils.is.notUndef, UNDEFINED_INPUT_ERROR);
+	    console.log('closed', closed);
 	    if (closed) {
+	      return false;
+	    }
+	    console.log('!takers.length', !takers.length);
+	    if (!takers.length) {
+	      buffer.put(input);
+	      return false;
+	    }
+	    return true;
+	  }
+
+	  function put(input) {
+	    console.log('put', input);
+	    if (!checkPut(input)) {
 	      return;
 	    }
-	    if (!takers.length) {
-	      return buffer.put(input);
-	    }
+	    console.log('put - after check', input);
+	    console.log('put - taker.length', takers.length);
 	    for (var i = 0; i < takers.length; i++) {
 	      var cb = takers[i];
 	      if (!cb[_utils.MATCH] || cb[_utils.MATCH](input)) {
 	        takers.splice(i, 1);
+	        console.log('put - firing cb');
 	        return cb(input);
 	      }
 	    }
+	  }
+
+	  function broadcast(input) {
+	    console.log('broadcast', input);
+	    if (!checkPut(input)) {
+	      return;
+	    }
+	    console.log('broadcast - takers', takers.length);
+	    for (var i = 0; i < takers.length; i++) {
+	      console.log('broadcast - takers in loop', takers.length, 'at iteration', i, takers[i]);
+	      var cb = takers[i];
+	      if (!cb[_utils.MATCH] || cb[_utils.MATCH](input)) {
+	        console.log('broadcast - takers in if in loop', takers.length);
+	        takers.splice(i, 1);
+	        console.log('broadcast - takers in if in loop, past splice', takers.length);
+	        i--; // step down, as takers changed
+	        cb(input);
+	      }
+	    }
+	    console.log('broadcast - after loop', takers.length);
 	  }
 
 	  function take(cb) {
@@ -644,7 +686,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 	  }
 
-	  return { take: take, put: put, flush: flush, close: close,
+	  return { take: take, put: put, broadcast: broadcast, flush: flush, close: close,
 	    get __takers__() {
 	      return takers;
 	    },
@@ -652,6 +694,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return closed;
 	    }
 	  };
+	}
+
+	function multicastChannel(buffer) {
+	  var chan = channel(buffer);
+	  return _extends({}, chan, {
+	    put: chan.broadcast
+	  });
 	}
 
 	function eventChannel(subscribe) {
@@ -666,17 +715,32 @@ return /******/ (function(modules) { // webpackBootstrap
 	    (0, _utils.check)(matcher, _utils.is.func, 'Invalid match function passed to eventChannel');
 	  }
 
-	  var chan = channel(buffer);
-	  var unsubscribe = subscribe(function (input) {
+	  function checkEmit(input) {
 	    if (isEnd(input)) {
 	      chan.close();
-	      return;
+	      return false;
 	    }
 	    if (matcher && !matcher(input)) {
+	      return false;
+	    }
+	    return true;
+	  }
+
+	  var chan = channel(buffer);
+	  var emit = function emit(input) {
+	    if (!checkEmit()) {
 	      return;
 	    }
 	    chan.put(input);
-	  });
+	  };
+	  var broadcast = function broadcast(input) {
+	    console.log('eventChannel broadcast', input);
+	    if (!checkEmit()) {
+	      return;
+	    }
+	    chan.broadcast(input);
+	  };
+	  var unsubscribe = subscribe(emit, broadcast);
 
 	  if (!_utils.is.func(unsubscribe)) {
 	    throw new Error('in eventChannel: subscribe should return a function to unsubscribe');
@@ -694,15 +758,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	}
 
-	function stdChannel(subscribe) {
-	  var chan = eventChannel(function (cb) {
+	// RETHINK: once might not be so cool, especially in regards of runSaga API
+	// maybe should be created per runSaga call + only once in the middleware
+	// on the other hand - how to share 1 instance of stdChannel
+	// between dynamic sagas (code-splitting etc)
+	var createStdChannel = exports.createStdChannel = (0, _utils.once)(function (subscribe) {
+	  var chan = eventChannel(function (_, broadcast) {
 	    return subscribe(function (input) {
+	      console.log('stdChannel input', input);
 	      if (input[_utils.SAGA_ACTION]) {
-	        cb(input);
+	        broadcast(input);
 	        return;
 	      }
 	      (0, _scheduler.asap)(function () {
-	        return cb(input);
+	        return broadcast(input);
 	      });
 	    });
 	  });
@@ -716,7 +785,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      chan.take(cb);
 	    }
 	  });
-	}
+	});
 
 /***/ },
 /* 4 */
@@ -1207,7 +1276,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	      onError = options.onError;
 
 	  var log = logger || _utils.log;
-	  var stdChannel = (0, _channel.stdChannel)(subscribe);
+	  var stdChannel = (0, _channel.createStdChannel)(subscribe);
+	  console.log('created stdChannel', stdChannel);
 	  /**
 	    Tracks the current effect cancellation
 	    Each time the generator progresses. calling runEffect will set a new value
@@ -1328,7 +1398,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  function end(result, isErr) {
 	    iterator._isRunning = false;
-	    stdChannel.close();
+	    console.log('stdChannel.close() : O');
+	    console.log(new Error().stack);
+	    // stdChannel.close()
 	    if (!isErr) {
 	      if (result === TASK_CANCEL && _utils.isDev) {
 	        log('info', name + ' has been cancelled', '');
@@ -1455,6 +1527,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var takeCb = function takeCb(inp) {
 	      return inp instanceof Error ? cb(inp, true) : (0, _channel.isEnd)(inp) && !maybe ? cb(CHANNEL_END) : cb(inp);
 	    };
+	    var _takeCb = takeCb;
+	    takeCb = function takeCb(input) {
+	      console.log('runTakeEffect - takeCb', pattern, input);
+	      if ((0, _channel.isEnd)(input)) {
+	        console.log(new Error().stack);
+	      }
+	      return _takeCb(input);
+	    };
 	    try {
 	      channel.take(takeCb, matcher(pattern));
 	    } catch (err) {
@@ -1476,8 +1556,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    (0, _scheduler.asap)(function () {
 	      var result = void 0;
 	      try {
+	        console.log('runPutEffect', action);
 	        result = (channel ? channel.put : dispatch)(action);
+	        console.log('runPutEffect - result', result);
 	      } catch (error) {
+	        console.log('runPutEffect - err?', error);
 	        // If we have a channel or `put.resolve` was used then bubble up the error.
 	        if (channel || resolve) return cb(error, true);
 	        log('error', 'uncaught at ' + name, error.stack || error.message || error);
@@ -1486,6 +1569,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (resolve && _utils.is.promise(result)) {
 	        resolvePromise(result, cb);
 	      } else {
+	        console.log('runPutEffect - cb(result)');
 	        return cb(result);
 	      }
 	    });
@@ -1693,6 +1777,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    var match = matcher(pattern);
 	    match.pattern = pattern;
+	    // TODO: feeling like stdChannel should be leveraged here
+	    // would be way obvious for a code reader to see that
+	    // runChannelEffect (in fact runActionChannelEffect)
+	    // uses the same semantics
+	    // the only hard thing here is that actionChannel effect
+	    // can have a buffer, which std lacks
+	    // 1. create a proxy channel here
+	    // 2. flag this subscribe somehow as PERSISTENT, so later it can be checked
+	    // 3. combo both?
+	    // also aint quite sure but it may suffer from the issue fixed with [SAGA_ACTION]
 	    cb((0, _channel.eventChannel)(subscribe, buffer || _buffers.buffers.fixed(), match));
 	  }
 

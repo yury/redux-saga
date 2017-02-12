@@ -1,8 +1,7 @@
 import { noop, kTrue, is, log as _log, check, deferred, uid as nextEffectId, remove, TASK, CANCEL, makeIterator, isDev } from './utils'
 import { asap, suspend, flush } from './scheduler'
 import { asEffect } from './io'
-import { stdChannel as _stdChannel, eventChannel, isEnd } from './channel'
-import { buffers } from './buffers'
+import { actionChannel, isEnd } from './channel'
 
 export const NOT_ITERATOR_ERROR = 'proc first argument (Saga function result) must be an iterator'
 
@@ -136,7 +135,7 @@ const wrapHelper = (helper) => ({ fn: helper })
 
 export default function proc(
   iterator,
-  subscribe = () => noop,
+  stdChannel,
   dispatch = noop,
   getState = noop,
   options = {},
@@ -148,7 +147,6 @@ export default function proc(
 
   const {sagaMonitor, logger, onError} = options
   const log = logger || _log
-  const stdChannel = _stdChannel(subscribe)
   /**
     Tracks the current effect cancellation
     Each time the generator progresses. calling runEffect will set a new value
@@ -272,7 +270,12 @@ export default function proc(
 
   function end(result, isErr) {
     iterator._isRunning = false
-    stdChannel.close()
+    // we cannot always close now, but should close only when root task ends
+    // or maybe even never as there might be multiple root tasks, even run dynamically
+    // only viable solution would be to close when whole middleware closes
+    // i.e. when END happens?
+
+    // stdChannel.close()
     if(!isErr) {
       if(result === TASK_CANCEL && isDev) {
         log('info', `${name} has been cancelled`, '')
@@ -403,7 +406,7 @@ export default function proc(
   }
 
   function resolveIterator(iterator, effectId, name, cb) {
-    proc(iterator, subscribe, dispatch, getState, options, effectId, name, cb)
+    proc(iterator, stdChannel, dispatch, getState, options, effectId, name, cb)
   }
 
   function runTakeEffect({channel, pattern, maybe}, cb) {
@@ -482,7 +485,7 @@ export default function proc(
 
     try {
       suspend()
-      const task = proc(taskIterator, subscribe, dispatch, getState, options, effectId, fn.name, (detached ? null : noop))
+      const task = proc(taskIterator, stdChannel, dispatch, getState, options, effectId, fn.name, (detached ? null : noop))
 
       if(detached) {
         cb(task)
@@ -614,9 +617,7 @@ export default function proc(
   }
 
   function runChannelEffect({pattern, buffer}, cb) {
-    const match = matcher(pattern)
-    match.pattern = pattern
-    cb(eventChannel(subscribe, buffer || buffers.fixed(), match))
+    cb(actionChannel(stdChannel, matcher(pattern), buffer))
   }
 
   function runCancelledEffect(data, cb) {

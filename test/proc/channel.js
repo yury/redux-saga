@@ -1,8 +1,6 @@
 import test from 'tape';
 import proc from '../../src/internal/proc'
 import * as io from '../../src/effects'
-//import { emitter } from '../../src/internal/channel'
-
 
 test('proc create channel for store actions', assert => {
   assert.plan(1);
@@ -10,7 +8,6 @@ test('proc create channel for store actions', assert => {
   let actual = [];
   let dispatch
   const input = (cb) => { dispatch = cb; return () => {} }
-
 
   function* genFn() {
     const chan = yield io.actionChannel('action')
@@ -20,8 +17,6 @@ test('proc create channel for store actions', assert => {
       actual.push(payload)
     }
   }
-
-
 
   proc(genFn(), input).done.catch(err => assert.fail(err))
 

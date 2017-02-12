@@ -1,34 +1,19 @@
-import { is, check, remove, MATCH, internalErr, SAGA_ACTION} from './utils'
+import { is, check, remove, MATCH, internalErr, SAGA_ACTION, sym } from './utils'
 import {buffers} from './buffers'
 import { asap } from './scheduler'
 
 const CHANNEL_END_TYPE = '@@redux-saga/CHANNEL_END'
+const PERSISTENT = sym('PERSISTENT')
 export const END = {type: CHANNEL_END_TYPE}
 export const isEnd = a => a && a.type === CHANNEL_END_TYPE
 
-export function emitter() {
-  const subscribers = []
-
-  function subscribe(sub) {
-    subscribers.push(sub)
-    return () => remove(subscribers, sub)
-  }
-
-  function emit(item) {
-    const arr = subscribers.slice()
-    for (var i = 0, len =  arr.length; i < len; i++) {
-      arr[i](item)
-    }
-  }
-
-  return {
-    subscribe,
-    emit
-  }
+const persistent = taker => {
+  taker[PERSISTENT] = true
+  return taker
 }
 
 export const INVALID_BUFFER = 'invalid buffer passed to channel factory function'
-export var UNDEFINED_INPUT_ERROR = 'Saga was provided with an undefined action'
+export let UNDEFINED_INPUT_ERROR = 'Saga was provided with an undefined action'
 
 if(process.env.NODE_ENV !== 'production') {
   UNDEFINED_INPUT_ERROR += `\nHints:
@@ -52,22 +37,51 @@ export function channel(buffer = buffers.fixed()) {
     }
   }
 
-  function put(input) {
+  function checkInput(input) {
     checkForbiddenStates()
     check(input, is.notUndef, UNDEFINED_INPUT_ERROR)
     if (closed) {
-      return
+      return false
     }
     if (!takers.length) {
-      return buffer.put(input)
+      buffer.put(input)
+      return false
+    }
+    return true
+  }
+
+  function put(input) {
+    if (!checkInput(input)) {
+      return
     }
     for (var i = 0; i < takers.length; i++) {
       const cb = takers[i]
       if(!cb[MATCH] || cb[MATCH](input)) {
-        takers.splice(i, 1)
+        if (!cb[PERSISTENT]) {
+          takers.splice(i, 1)
+        }
         return cb(input)
       }
     }
+  }
+
+  function broadcast(input) {
+    if (!checkInput(input)) {
+      return
+    }
+    const arr = takers.slice()
+    takers = []
+    for (var i = 0; i < arr.length; i++) {
+      const cb = arr[i]
+      if(!cb[MATCH] || cb[MATCH](input)) {
+        if (!cb[PERSISTENT]) {
+          arr.splice(i, 1)
+          i-- // step down, as takers changed
+        }
+        cb(input)
+      }
+    }
+    takers = arr.concat(takers)
   }
 
   function take(cb) {
@@ -85,7 +99,7 @@ export function channel(buffer = buffers.fixed()) {
   }
 
   function flush(cb) {
-    checkForbiddenStates() // TODO: check if some new state should be forbidden now
+    checkForbiddenStates()
     check(cb, is.func, 'channel.flush\' callback must be a function')
     if (closed && buffer.isEmpty()) {
       cb(END)
@@ -108,9 +122,17 @@ export function channel(buffer = buffers.fixed()) {
     }
   }
 
-  return {take, put, flush, close,
+  return {take, put, broadcast, flush, close,
     get __takers__() { return takers },
     get __closed__() { return closed }
+  }
+}
+
+export function multicastChannel(buffer) {
+  const chan = channel(buffer)
+  return {
+    ...chan,
+    put: chan.broadcast
   }
 }
 
@@ -123,17 +145,31 @@ export function eventChannel(subscribe, buffer = buffers.none(), matcher) {
     check(matcher, is.func, 'Invalid match function passed to eventChannel')
   }
 
-  const chan = channel(buffer)
-  const unsubscribe = subscribe(input => {
+  function checkInput(input) {
     if(isEnd(input)) {
       chan.close()
-      return
+      return false
     }
     if(matcher && !matcher(input)) {
+      return false
+    }
+    return true
+  }
+
+  const chan = channel(buffer)
+  const emit = input => {
+    if (!checkInput(input)) {
       return
     }
     chan.put(input)
-  })
+  }
+  const broadcast = input => {
+    if (!checkInput(input)) {
+      return
+    }
+    chan.broadcast(input)
+  }
+  const unsubscribe = subscribe(emit, broadcast)
 
   if(!is.func(unsubscribe)) {
     throw new Error('in eventChannel: subscribe should return a function to unsubscribe')
@@ -151,23 +187,51 @@ export function eventChannel(subscribe, buffer = buffers.none(), matcher) {
   }
 }
 
-export function stdChannel(subscribe) {
-  const chan = eventChannel(cb => subscribe(input => {
+export function actionChannel(stdChannel, match, buffer) {
+  const chan = channel(buffer)
+
+  const taker = persistent(chan.put)
+  stdChannel.take(taker, match)
+
+  const unsubscribe = () => remove(stdChannel.__takers__, taker)
+
+  return {
+    take: chan.take,
+    flush: chan.flush,
+    close: () => {
+      if(!chan.__closed__) {
+        chan.close()
+        unsubscribe()
+      }
+    }
+  }
+}
+
+export const createStdChannel = () => {
+  // could be remade to let emit = broadcast => input =>
+  // and override it once broadcast is applied
+  let broadcast
+  const emit = input => {
     if (input[SAGA_ACTION]) {
-      cb(input)
+      broadcast(input)
       return
     }
-    asap(() => cb(input))
-  }))
+    asap(() => broadcast(input))
+  }
+  const chan = eventChannel((_, _broadcast) => {
+    broadcast = _broadcast
+    return () => chan.close()
+  })
 
   return {
     ...chan,
     take(cb, matcher) {
       if(arguments.length > 1) {
-        check(matcher, is.func, 'channel.take\'s matcher argument must be a function')
+        check(matcher, is.func, 'stdChannel.take\'s matcher argument must be a function')
         cb[MATCH] = matcher
       }
       chan.take(cb)
-    }
+    },
+    put: emit
   }
 }

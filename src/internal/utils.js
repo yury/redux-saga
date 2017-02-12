@@ -24,6 +24,11 @@ export function hasOwn(object, property) {
   return is.notUndef(object) && hasOwnProperty.call(object, property)
 }
 
+export const once = fn => {
+  let cached
+  return (...args) => cached || (cached = fn(...args))
+}
+
 export const is = {
   undef         : v => v === null || v === undefined,
   notUndef      : v => v !== null && v !== undefined,
@@ -45,6 +50,28 @@ export function remove(array, item) {
   const index = array.indexOf(item)
   if(index >= 0) {
     array.splice(index, 1)
+  }
+}
+
+export function emitter() {
+  const subscribers = []
+
+  function subscribe(sub) {
+    subscribers.push(sub)
+    return () => remove(subscribers, sub)
+  }
+
+  function emit(item) {
+    const arr = subscribers.slice()
+    for (var i = 0, len =  arr.length; i < len; i++) {
+      const cb = arr[i]
+      cb(item)
+    }
+  }
+
+  return {
+    subscribe,
+    emit
   }
 }
 

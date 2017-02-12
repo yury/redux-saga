@@ -1,6 +1,6 @@
 import { noop, is, check, uid as nextSagaId, wrapSagaDispatch, isDev, log } from './utils'
 import proc from './proc'
-import { emitter } from './channel'
+import { createStdChannel } from './channel'
 import { ident } from './utils'
 
 export default function sagaMiddlewareFactory(options = {}) {
@@ -55,14 +55,14 @@ export default function sagaMiddlewareFactory(options = {}) {
 
   function sagaMiddleware({getState, dispatch}) {
     runSagaDynamically = runSaga
-    const sagaEmitter = emitter()
-    sagaEmitter.emit = (options.emitter || ident)(sagaEmitter.emit)
+    const stdChannel = createStdChannel()
+    stdChannel.emit = (options.emitter || ident)(stdChannel.put)
     const sagaDispatch = wrapSagaDispatch(dispatch)
 
     function runSaga(saga, args, sagaId) {
       return proc(
         saga(...args),
-        sagaEmitter.subscribe,
+        stdChannel,
         sagaDispatch,
         getState,
         options,
@@ -76,7 +76,7 @@ export default function sagaMiddlewareFactory(options = {}) {
         sagaMonitor.actionDispatched(action)
       }
       const result = next(action) // hit reducers
-      sagaEmitter.emit(action)
+      stdChannel.emit(action)
       return result
     }
   }

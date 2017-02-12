@@ -1,27 +1,15 @@
 import test from 'tape';
 import proc from '../../src/internal/proc'
-import { channel, END } from '../../src/internal/channel'
+import { createStdChannel, channel, END } from '../../src/internal/channel'
 import * as io from '../../src/effects'
 
 test('processor take from default channel', assert => {
   assert.plan(1);
 
   const typeSymbol = Symbol('action-symbol');
+  const stdChannel = createStdChannel()
 
   let actual = [];
-  const input = (cb) => {
-    Promise.resolve(1)
-      .then(() => cb({type: 'action-*'}))
-      .then(() => cb({type: 'action-1'}))
-      .then(() => cb({type: 'action-2'}))
-      .then(() => cb({type: 'unnoticeable-action'}))
-      .then(() => cb({isAction: true}))
-      .then(() => cb({isMixedWithPredicate: true}))
-      .then(() => cb({type: 'action-3'}))
-      .then(() => cb({type: typeSymbol}))
-      .then(() => cb({...END, timestamp: Date.now()})) // see #316
-    return () => {}
-  }
 
   function* genFn() {
     try {
@@ -38,18 +26,27 @@ test('processor take from default channel', assert => {
     }
   }
 
-  proc(genFn(), input).done.catch(err => assert.fail(err))
+  proc(genFn(), stdChannel).done.catch(err => assert.fail(err))
 
-  const expected = [{type: 'action-*'}, {type: 'action-1'}, {type: 'action-2'}, {isAction: true},
-      {isMixedWithPredicate: true}, {type: 'action-3'}, {type: typeSymbol}, 'auto ended'];
+  Promise.resolve(1)
+      .then(() => stdChannel.put({type: 'action-*'}))
+      .then(() => stdChannel.put({type: 'action-1'}))
+      .then(() => stdChannel.put({type: 'action-2'}))
+      .then(() => stdChannel.put({type: 'unnoticeable-action'}))
+      .then(() => stdChannel.put({isAction: true}))
+      .then(() => stdChannel.put({isMixedWithPredicate: true}))
+      .then(() => stdChannel.put({type: 'action-3'}))
+      .then(() => stdChannel.put({type: typeSymbol}))
+      .then(() => stdChannel.put({...END, timestamp: Date.now()})) // see #316
+      .then(() => {
+        const expected = [{type: 'action-*'}, {type: 'action-1'}, {type: 'action-2'}, {isAction: true},
+          {isMixedWithPredicate: true}, {type: 'action-3'}, {type: typeSymbol}, 'auto ended'];
 
-  setTimeout(() => {
-    assert.deepEqual(actual, expected,
-      "processor must fullfill take Effects from default channel"
-    );
-    assert.end();
-  }, 0)
-
+        assert.deepEqual(actual, expected,
+          "processor must fullfill take Effects from default channel"
+        );
+        assert.end();
+      })
 });
 
 test('processor take from provided channel', assert => {
