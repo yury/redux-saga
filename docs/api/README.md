@@ -34,7 +34,8 @@
   * [`cancelled()`](#cancelled)
 * [`Effect combinators`](#effect-combinators)
   * [`race(effects)`](#raceeffects)
-  * [`[...effects] (aka parallel effects)`](#effects-parallel-effects)
+  * [`all([...effects]) (aka parallel effects)`](#alleffects-parallel-effects)
+  * [`all(effects)`](#alleffects)
 * [`Interfaces`](#interfaces)
   * [`Task`](#task)
   * [`Channel`](#channel)
@@ -713,7 +714,7 @@ function* saga() {
 ### `race(effects)`
 
 Creates an Effect description that instructs the middleware to run a *Race* between
-multiple Effects (this is similar to how `Promise.race([...])` behaves).
+multiple Effects (this is similar to how [`Promise.race([...])`](https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Global_Objects/Promise/race) behaves).
 
 `effects: Object` - a dictionary Object of the form {label: effect, ...}
 
@@ -746,10 +747,10 @@ will be a single keyed object `{cancel: action}`, where action is the dispatched
 
 When resolving a `race`, the middleware automatically cancels all the losing Effects.
 
-### `[...effects] (parallel effects)`
+### `all([...effects]) - parallel effects`
 
 Creates an Effect description that instructs the middleware to run multiple Effects
-in parallel and wait for all of them to complete.
+in parallel and wait for all of them to complete. It's quite the corresponding API to standard [`Promise#all`](https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Global_Objects/Promise/all).
 
 #### Example
 
@@ -759,10 +760,31 @@ The following example runs two blocking calls in parallel:
 import { fetchCustomers, fetchProducts } from './path/to/api'
 
 function* mySaga() {
-  const [customers, products] = yield [
+  const [customers, products] = yield all([
     call(fetchCustomers),
     call(fetchProducts)
-  ]
+  ])
+}
+```
+
+### `all(effects)`
+
+The same as [`all([...effects])`](#alleffects-parallel-effects) but let's you to pass in a dictionary object of effects with labels, just like [`race(effects)`](#alleffects)
+
+`effects: Object` - a dictionary Object of the form {label: effect, ...}
+
+#### Example
+
+The following example runs two blocking calls in parallel:
+
+```javascript
+import { fetchCustomers, fetchProducts } from './path/to/api'
+
+function* mySaga() {
+  const { customers, products } = yield all({
+    customers: call(fetchCustomers),
+    products: call(fetchProducts)
+  })
 }
 ```
 
@@ -932,7 +954,7 @@ connect a Saga to external input/output, other than store actions.
   - `sagaMonitor` : [SagaMonitor](#sagamonitor) - see docs for [`createSagaMiddleware(options)`](#createsagamiddlewareoptions)
 
   - `logger` : `Function` - see docs for [`createSagaMiddleware(options)`](#createsagamiddlewareoptions)
-  
+
   - `onError`: `Function` - see docs for [`createSagaMiddleware(options)`](#createsagamiddlewareoptions)
 
 #### Notes

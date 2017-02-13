@@ -1,9 +1,10 @@
-import { sym, is, ident, check, deprecate } from './utils'
+import { sym, is, ident, check, deprecate, updateIncentive } from './utils'
 import { takeEveryHelper, takeLatestHelper, throttleHelper } from './sagaHelpers'
 
 const IO             = sym('IO')
 const TAKE           = 'TAKE'
 const PUT            = 'PUT'
+const ALL            = 'ALL'
 const RACE           = 'RACE'
 const CALL           = 'CALL'
 const CPS            = 'CPS'
@@ -16,9 +17,6 @@ const CANCELLED      = 'CANCELLED'
 const FLUSH          = 'FLUSH'
 
 const TEST_HINT = '\n(HINT: if you are getting this errors in tests, consider using createMockTask from redux-saga/utils)'
-
-const deprecationWarning = (deprecated, preferred) =>
-  `${ deprecated } has been deprecated in favor of ${ preferred }, please update your code`
 
 const effect = (type, payload) => ({[IO]: true, [type]: payload})
 
@@ -41,7 +39,7 @@ take.maybe = (...args) => {
   return eff
 }
 
-export const takem = deprecate(take.maybe, deprecationWarning('takem', 'take.maybe'))
+export const takem = deprecate(take.maybe, updateIncentive('takem', 'take.maybe'))
 
 export function put(channel, action) {
   if(arguments.length > 1) {
@@ -62,7 +60,11 @@ put.resolve = (...args) => {
   return eff
 }
 
-put.sync = deprecate(put.resolve, deprecationWarning('put.sync', 'put.resolve'))
+put.sync = deprecate(put.resolve, updateIncentive('put.sync', 'put.resolve'))
+
+export function all(effects) {
+  return effect(ALL, effects)
+}
 
 export function race(effects) {
   return effect(RACE, effects)
@@ -176,6 +178,7 @@ const createAsEffectType = type => effect => effect && effect[IO] && effect[type
 export const asEffect = {
   take         : createAsEffectType(TAKE),
   put          : createAsEffectType(PUT),
+  all          : createAsEffectType(ALL),
   race         : createAsEffectType(RACE),
   call         : createAsEffectType(CALL),
   cps          : createAsEffectType(CPS),
