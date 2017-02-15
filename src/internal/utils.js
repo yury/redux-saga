@@ -30,6 +30,7 @@ export const is = {
   notUndef       : v => v !== null && v !== undefined,
   func           : f => typeof f === 'function',
   number         : n => typeof n === 'number',
+  string         : s => typeof s === 'string',
   array          : Array.isArray,
   promise        : p => p && is.func(p.then),
   iterator       : it => it && is.func(it.next) && is.func(it.throw),

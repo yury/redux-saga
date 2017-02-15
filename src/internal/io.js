@@ -77,6 +77,9 @@ function getFnCallDesc(meth, fn, args) {
   } else if(fn.fn) {
     ({context, fn} = fn)
   }
+  if (context && is.string(fn)) {
+    fn = context[fn]
+  }
   check(fn, is.func, `${meth}: argument ${fn} is not a function`)
 
   return {context, fn, args}
