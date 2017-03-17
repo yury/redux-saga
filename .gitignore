@@ -27,7 +27,7 @@ build/Release
 node_modules
 
 # compiled js files
-lib
+# lib
 es
 
 # compiled umd js files
